@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible download, transcription, queue, or export problem.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never attach private videos, authentication cookies, tokens, or confidential transcript text.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe what you expected and what actually happened.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Add a public URL...
+        2. Select model...
+        3. Select processing mode...
+    validations:
+      required: true
+  - type: dropdown
+    id: processing
+    attributes:
+      label: Processing mode
+      options: [Auto, NVIDIA GPU, CPU]
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Whisper model
+      placeholder: large-v3
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: diagnose.bat output
+      description: Paste the output after removing personal paths or other sensitive information.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log excerpt
+      description: Paste only the relevant error from logs/yt-transcriber.log.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I used a public or otherwise authorized video.
+          required: true
+        - label: I removed private URLs, tokens, cookies, and personal transcript content.
+          required: true
