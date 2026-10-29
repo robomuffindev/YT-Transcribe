@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
+from .api import ApiServer
 from .core import JobCancelled, JobResult, create_transcript_zip, is_youtube_url, process_video
 from .hardware import detect_hardware
 
@@ -62,6 +63,7 @@ class TranscriberApp(tk.Tk):
         self.results: dict[str, JobResult] = {}
         self.next_job_number = 1
         self.active_job_id: str | None = None
+        self.api_server: ApiServer | None = None
 
         default_output = Path.home() / "Documents" / "YT Transcripts"
         self.hardware_status = detect_hardware()
@@ -72,6 +74,8 @@ class TranscriberApp(tk.Tk):
         self.processing_var = tk.StringVar(value="Auto (GPU if available)")
         self.language_var = tk.StringVar(value="Auto-detect")
         self.keep_video_var = tk.BooleanVar(value=True)
+        self.api_enabled_var = tk.BooleanVar(value=False)
+        self.api_status_var = tk.StringVar(value="API off — localhost access disabled")
         self.status_var = tk.StringVar(value="Paste a YouTube link to begin.")
         if self.cuda_ready:
             hardware_note = "NVIDIA GPU runtime ready."
@@ -83,6 +87,7 @@ class TranscriberApp(tk.Tk):
 
         self._build_styles()
         self._build_ui()
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.after(100, self._drain_events)
 
     def _build_styles(self) -> None:
@@ -101,7 +106,7 @@ class TranscriberApp(tk.Tk):
         style.configure("Horizontal.TProgressbar", troughcolor="#e5e7eb", background="#2563eb")
 
     def _build_ui(self) -> None:
-        shell = ttk.Frame(self, padding=(26, 22))
+        shell = ttk.Frame(self, padding=(26, 14))
         shell.pack(fill="both", expand=True)
 
         ttk.Label(shell, text="YT Transcriber", style="Title.TLabel").pack(anchor="w")
@@ -109,23 +114,23 @@ class TranscriberApp(tk.Tk):
             shell,
             text="Download a video and turn its speech into AI-ready text — entirely on this computer.",
             style="Subtitle.TLabel",
-        ).pack(anchor="w", pady=(2, 18))
+        ).pack(anchor="w", pady=(2, 10))
 
-        card = ttk.Frame(shell, style="Card.TFrame", padding=20)
+        card = ttk.Frame(shell, style="Card.TFrame", padding=14)
         card.pack(fill="x")
         card.columnconfigure(0, weight=1)
 
         ttk.Label(card, text="YouTube URLs (one per line)", style="Section.TLabel").grid(row=0, column=0, sticky="w")
-        self.url_entry = tk.Text(card, height=3, font=("Segoe UI", 10), relief="solid", borderwidth=1, padx=8, pady=6)
-        self.url_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(7, 16))
+        self.url_entry = tk.Text(card, height=2, font=("Segoe UI", 10), relief="solid", borderwidth=1, padx=8, pady=6)
+        self.url_entry.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(5, 10))
         self.url_entry.focus_set()
         self.add_button = ttk.Button(card, text="Add to queue", command=self._add_to_queue)
-        self.add_button.grid(row=1, column=2, sticky="nsew", padx=(8, 0), pady=(7, 16))
+        self.add_button.grid(row=1, column=2, sticky="nsew", padx=(8, 0), pady=(5, 10))
 
         ttk.Label(card, text="Save files to", style="Section.TLabel").grid(row=2, column=0, sticky="w")
         output_entry = ttk.Entry(card, textvariable=self.output_var)
-        output_entry.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(7, 16), ipady=5)
-        ttk.Button(card, text="Browse…", command=self._browse_output).grid(row=3, column=2, padx=(8, 0), pady=(7, 16))
+        output_entry.grid(row=3, column=0, columnspan=2, sticky="ew", pady=(5, 10), ipady=4)
+        ttk.Button(card, text="Browse…", command=self._browse_output).grid(row=3, column=2, padx=(8, 0), pady=(5, 10))
 
         options = ttk.Frame(card, style="Card.TFrame")
         options.grid(row=4, column=0, columnspan=3, sticky="ew")
@@ -182,10 +187,10 @@ class TranscriberApp(tk.Tk):
             card,
             text="Keep the downloaded video (turn off to save only the audio)",
             variable=self.keep_video_var,
-        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(18, 2))
+        ).grid(row=5, column=0, columnspan=3, sticky="w", pady=(10, 2))
 
-        queue_card = ttk.Frame(shell, style="Card.TFrame", padding=14)
-        queue_card.pack(fill="x", pady=(14, 0))
+        queue_card = ttk.Frame(shell, style="Card.TFrame", padding=10)
+        queue_card.pack(fill="x", pady=(10, 0))
         queue_header = ttk.Frame(queue_card, style="Card.TFrame")
         queue_header.pack(fill="x", pady=(0, 8))
         ttk.Label(queue_header, text="Batch queue", style="Section.TLabel").pack(side="left")
@@ -194,7 +199,7 @@ class TranscriberApp(tk.Tk):
         self.remove_button = ttk.Button(queue_header, text="Remove selected", command=self._remove_selected)
         self.remove_button.pack(side="right", padx=(0, 8))
 
-        self.queue_view = ttk.Treeview(queue_card, columns=("status", "url"), show="headings", height=5, selectmode="browse")
+        self.queue_view = ttk.Treeview(queue_card, columns=("status", "url"), show="headings", height=3, selectmode="browse")
         self.queue_view.heading("status", text="Status")
         self.queue_view.heading("url", text="Video URL / title")
         self.queue_view.column("status", width=125, minwidth=100, stretch=False)
@@ -205,7 +210,30 @@ class TranscriberApp(tk.Tk):
         queue_scroll.pack(side="right", fill="y")
         self.queue_view.bind("<<TreeviewSelect>>", self._on_queue_select)
 
-        controls = ttk.Frame(shell, padding=(0, 16))
+        api_card = ttk.Frame(shell, style="Card.TFrame", padding=(14, 10))
+        api_card.pack(fill="x", pady=(10, 0))
+        ttk.Label(api_card, text="Agent API", style="Section.TLabel").pack(side="left")
+        self.api_toggle = ttk.Checkbutton(
+            api_card,
+            text="Enable localhost API",
+            variable=self.api_enabled_var,
+            command=self._toggle_api,
+        )
+        self.api_toggle.pack(side="left", padx=(14, 10))
+        ttk.Label(api_card, textvariable=self.api_status_var, style="Card.TLabel", foreground="#64748b").pack(
+            side="left", fill="x", expand=True
+        )
+        self.api_docs_button = ttk.Button(api_card, text="API docs", command=self._open_api_docs, state="disabled")
+        self.api_docs_button.pack(side="right")
+        self.api_instructions_button = ttk.Button(
+            api_card,
+            text="Agent instructions",
+            command=self._show_agent_instructions,
+            state="disabled",
+        )
+        self.api_instructions_button.pack(side="right", padx=(0, 8))
+
+        controls = ttk.Frame(shell, padding=(0, 10))
         controls.pack(fill="x")
         self.start_button = ttk.Button(controls, text="Run queued videos", style="Primary.TButton", command=self._start)
         self.start_button.pack(side="left")
@@ -216,14 +244,14 @@ class TranscriberApp(tk.Tk):
         self.bundle_button = ttk.Button(controls, text="Export completed ZIP", command=self._export_bundle, state="disabled")
         self.bundle_button.pack(side="right", padx=(0, 8))
 
-        progress_card = ttk.Frame(shell, style="Card.TFrame", padding=18)
+        progress_card = ttk.Frame(shell, style="Card.TFrame", padding=12)
         progress_card.pack(fill="x")
         ttk.Label(progress_card, textvariable=self.status_var, style="Section.TLabel").pack(anchor="w")
         self.progress = ttk.Progressbar(progress_card, mode="determinate", maximum=100)
-        self.progress.pack(fill="x", pady=(10, 7))
+        self.progress.pack(fill="x", pady=(7, 5))
         ttk.Label(progress_card, textvariable=self.detail_var, style="Card.TLabel", foreground="#64748b").pack(anchor="w")
 
-        result_header = ttk.Frame(shell, padding=(0, 16, 0, 7))
+        result_header = ttk.Frame(shell, padding=(0, 10, 0, 5))
         result_header.pack(fill="x")
         ttk.Label(result_header, text="Transcript preview", font=("Segoe UI Semibold", 11)).pack(side="left")
         self.copy_button = ttk.Button(result_header, text="Copy transcript", command=self._copy, state="disabled")
@@ -254,6 +282,120 @@ class TranscriberApp(tk.Tk):
     def _model_changed(self, _event: object = None) -> None:
         self.model_help.configure(text=MODEL_HELP[self.model_var.get()])
 
+    def _api_defaults(self) -> dict[str, object]:
+        return {
+            "output_dir": self.output_var.get().strip(),
+            "model_name": self.model_var.get(),
+            "language": LANGUAGES[self.language_var.get()],
+            "keep_video": False,
+            "device_preference": PROCESSING[self.processing_var.get()],
+        }
+
+    def _toggle_api(self) -> None:
+        self.api_toggle.configure(state="disabled")
+        if self.api_enabled_var.get():
+            if not self.output_var.get().strip():
+                self.api_enabled_var.set(False)
+                self.api_toggle.configure(state="normal")
+                messagebox.showerror(APP_NAME, "Choose an output folder before enabling the API.")
+                return
+            if self.api_server is None:
+                self.api_server = ApiServer(
+                    on_enqueue=lambda jobs: self.events.put(("api_enqueue", {"jobs": jobs})),
+                    default_settings=self._api_defaults(),
+                )
+            else:
+                self.api_server.update_defaults(self._api_defaults())
+            self.api_status_var.set("Starting secure localhost API…")
+            self.api_instructions_button.configure(state="disabled")
+            self.api_docs_button.configure(state="disabled")
+
+            def start_server() -> None:
+                try:
+                    assert self.api_server is not None
+                    self.api_server.start()
+                    if not self.api_server.wait_until_started():
+                        raise RuntimeError("The local API did not start within five seconds")
+                    self.events.put(("api_started", {}))
+                except Exception as exc:
+                    logger.exception("Could not start local API")
+                    self.events.put(("api_error", {"message": str(exc)}))
+
+            threading.Thread(target=start_server, name="api-starter", daemon=True).start()
+        else:
+            self.api_status_var.set("Stopping local API…")
+
+            def stop_server() -> None:
+                if self.api_server:
+                    self.api_server.stop()
+                self.events.put(("api_stopped", {}))
+
+            threading.Thread(target=stop_server, name="api-stopper", daemon=True).start()
+
+    def _show_agent_instructions(self) -> None:
+        if not self.api_server or not self.api_server.running:
+            messagebox.showinfo(APP_NAME, "Enable the local API first.")
+            return
+        dialog = tk.Toplevel(self)
+        dialog.title("LLM Agent API Instructions")
+        dialog.geometry("820x680")
+        dialog.minsize(640, 480)
+        dialog.transient(self)
+
+        frame = ttk.Frame(dialog, padding=16)
+        frame.pack(fill="both", expand=True)
+        ttk.Label(frame, text="Copy these instructions into your local LLM agent", font=("Segoe UI Semibold", 13)).pack(
+            anchor="w", pady=(0, 8)
+        )
+        ttk.Label(
+            frame,
+            text="The live bearer token is hidden here. Copying includes it, and it changes when the app restarts.",
+            foreground="#64748b",
+        ).pack(anchor="w", pady=(0, 10))
+        text_widget = tk.Text(frame, wrap="word", font=("Consolas", 9), padx=12, pady=12)
+        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        safe_instructions = self.api_server.agent_instructions().replace(
+            self.api_server.token,
+            "<hidden — use Copy all instructions>",
+        )
+        text_widget.insert("1.0", safe_instructions)
+        text_widget.configure(state="disabled")
+        text_widget.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+
+        buttons = ttk.Frame(dialog, padding=(16, 0, 16, 16))
+        buttons.pack(fill="x")
+
+        def copy_all() -> None:
+            assert self.api_server is not None
+            self.clipboard_clear()
+            self.clipboard_append(self.api_server.agent_instructions())
+            self.update()
+            copy_button.configure(text="Copied!")
+            dialog.after(1600, lambda: copy_button.configure(text="Copy all instructions"))
+
+        copy_button = ttk.Button(buttons, text="Copy all instructions", command=copy_all)
+        copy_button.pack(side="left")
+        ttk.Button(buttons, text="Open API docs", command=self._open_api_docs).pack(side="left", padx=(8, 0))
+        ttk.Button(buttons, text="Close", command=dialog.destroy).pack(side="right")
+
+    def _open_api_docs(self) -> None:
+        if not self.api_server or not self.api_server.running:
+            return
+        try:
+            if sys.platform == "win32":
+                os.startfile(f"{self.api_server.base_url}/docs")  # type: ignore[attr-defined]
+            else:
+                subprocess.Popen(["xdg-open", f"{self.api_server.base_url}/docs"])
+        except Exception as exc:
+            messagebox.showerror(APP_NAME, f"Could not open API documentation: {exc}")
+
+    def _on_close(self) -> None:
+        if self.api_server:
+            self.api_server.stop()
+        self.destroy()
+
     def _browse_output(self) -> None:
         selected = filedialog.askdirectory(initialdir=self.output_var.get() or str(Path.home()))
         if selected:
@@ -279,7 +421,7 @@ class TranscriberApp(tk.Tk):
                 continue
             job_id = f"job-{self.next_job_number}"
             self.next_job_number += 1
-            self.jobs[job_id] = {"url": url, "status": "Queued", "error": ""}
+            self.jobs[job_id] = {"url": url, "status": "Queued", "error": "", "source": "desktop"}
             self.queue_view.insert("", "end", iid=job_id, values=("Queued", url))
             existing_urls.add(url)
             added += 1
@@ -289,6 +431,31 @@ class TranscriberApp(tk.Tk):
         if added:
             self.status_var.set(f"{added} video{'s' if added != 1 else ''} added to the queue.")
         return bool(added)
+
+    def _enqueue_api_jobs(self, queued: list[dict[str, object]]) -> None:
+        for item in queued:
+            job_id = str(item["job_id"])
+            url = str(item["url"])
+            if job_id in self.jobs:
+                continue
+            self.jobs[job_id] = {
+                "url": url,
+                "status": "Queued",
+                "error": "",
+                "source": "api",
+                "settings": dict(item["settings"]),
+            }
+            self.queue_view.insert("", "end", iid=job_id, values=("Queued (API)", url))
+        if queued:
+            self.status_var.set(f"API added {len(queued)} video{'s' if len(queued) != 1 else ''} to the queue.")
+        if not (self.worker and self.worker.is_alive()):
+            pending = [
+                job_id
+                for job_id, job in self.jobs.items()
+                if job.get("status") == "Queued" and job.get("source") == "api"
+            ]
+            if pending:
+                self._launch_batch(pending)
 
     def _selected_job_id(self) -> str | None:
         selected = self.queue_view.selection()
@@ -309,6 +476,8 @@ class TranscriberApp(tk.Tk):
         if not job_id:
             return
         self.queue_view.delete(job_id)
+        if self.jobs.get(job_id, {}).get("source") == "api" and self.api_server:
+            self.api_server.store.cancel(job_id)
         self.jobs.pop(job_id, None)
         self.results.pop(job_id, None)
         self.last_result = None
@@ -362,6 +531,21 @@ class TranscriberApp(tk.Tk):
             self.url_entry.focus_set()
             return
 
+        desktop_settings = {
+            "output_dir": self.output_var.get().strip(),
+            "model_name": self.model_var.get(),
+            "language": LANGUAGES[self.language_var.get()],
+            "keep_video": self.keep_video_var.get(),
+            "device_preference": PROCESSING[self.processing_var.get()],
+        }
+        for job_id in pending:
+            if "settings" not in self.jobs[job_id]:
+                self.jobs[job_id]["settings"] = dict(desktop_settings)
+        self._launch_batch(pending)
+
+    def _launch_batch(self, pending: list[str]) -> None:
+        if not pending or (self.worker and self.worker.is_alive()):
+            return
         self.cancel_event.clear()
         self.progress.configure(value=0, mode="determinate")
         self.status_var.set(f"Starting batch of {len(pending)} video{'s' if len(pending) != 1 else ''}…")
@@ -371,18 +555,10 @@ class TranscriberApp(tk.Tk):
         self.add_button.configure(state="disabled")
         self.remove_button.configure(state="disabled")
         self.clear_button.configure(state="disabled")
-
-        settings = {
-            "output_dir": self.output_var.get().strip(),
-            "model_name": self.model_var.get(),
-            "language": LANGUAGES[self.language_var.get()],
-            "keep_video": self.keep_video_var.get(),
-            "device_preference": PROCESSING[self.processing_var.get()],
-        }
-        self.worker = threading.Thread(target=self._run_batch, args=(pending, settings), daemon=True)
+        self.worker = threading.Thread(target=self._run_batch, args=(pending,), daemon=True)
         self.worker.start()
 
-    def _run_batch(self, pending: list[str], settings: dict[str, object]) -> None:
+    def _run_batch(self, pending: list[str]) -> None:
         completed = 0
         failed = 0
         total = len(pending)
@@ -390,14 +566,18 @@ class TranscriberApp(tk.Tk):
             if self.cancel_event.is_set():
                 break
             url = str(self.jobs[job_id]["url"])
+            settings = dict(self.jobs[job_id]["settings"])
             self.events.put(("batch_job_started", {"job_id": job_id, "index": index, "total": total, "url": url}))
             try:
+                def report(event: str, payload: dict, current_id: str = job_id) -> None:
+                    if self.api_server and self.jobs.get(current_id, {}).get("source") == "api":
+                        self.api_server.store.update_event(current_id, event, payload)
+                    self.events.put((event, {**payload, "job_id": current_id}))
+
                 result = process_video(
                     url=url,
                     **settings,
-                    callback=lambda event, payload, current_id=job_id: self.events.put(
-                        (event, {**payload, "job_id": current_id})
-                    ),
+                    callback=report,
                     cancel_event=self.cancel_event,
                 )
                 completed += 1
@@ -416,7 +596,13 @@ class TranscriberApp(tk.Tk):
         self.events.put(
             (
                 "batch_done",
-                {"completed": completed, "failed": failed, "stopped": self.cancel_event.is_set(), "total": total},
+                {
+                    "completed": completed,
+                    "failed": failed,
+                    "stopped": self.cancel_event.is_set(),
+                    "total": total,
+                    "api_only": all(self.jobs[job_id].get("source") == "api" for job_id in pending),
+                },
             )
         )
 
@@ -436,10 +622,34 @@ class TranscriberApp(tk.Tk):
         self.after(100, self._drain_events)
 
     def _handle_event(self, event: str, payload: dict) -> None:
-        if event == "batch_job_started":
+        if event == "api_started":
+            assert self.api_server is not None
+            self.api_enabled_var.set(True)
+            self.api_toggle.configure(state="normal")
+            self.api_status_var.set(f"API on • {self.api_server.base_url} • bearer token required")
+            self.api_instructions_button.configure(state="normal")
+            self.api_docs_button.configure(state="normal")
+        elif event == "api_stopped":
+            self.api_enabled_var.set(False)
+            self.api_toggle.configure(state="normal")
+            self.api_status_var.set("API off — localhost access disabled")
+            self.api_instructions_button.configure(state="disabled")
+            self.api_docs_button.configure(state="disabled")
+        elif event == "api_error":
+            self.api_enabled_var.set(False)
+            self.api_toggle.configure(state="normal")
+            self.api_status_var.set("API failed to start")
+            self.api_instructions_button.configure(state="disabled")
+            self.api_docs_button.configure(state="disabled")
+            messagebox.showerror(APP_NAME, str(payload.get("message", "Could not start the local API")))
+        elif event == "api_enqueue":
+            self._enqueue_api_jobs(list(payload.get("jobs") or []))
+        elif event == "batch_job_started":
             job_id = str(payload["job_id"])
             self.active_job_id = job_id
             self._set_job_status(job_id, "Processing")
+            if self.api_server and self.jobs.get(job_id, {}).get("source") == "api":
+                self.api_server.store.set_processing(job_id)
             self.queue_view.selection_set(job_id)
             self.queue_view.see(job_id)
             self.status_var.set(f"Video {payload['index']} of {payload['total']}: starting…")
@@ -480,12 +690,17 @@ class TranscriberApp(tk.Tk):
             )
         elif event == "job_cancelled":
             self.progress.stop()
-            self._set_job_status(str(payload["job_id"]), "Cancelled")
+            job_id = str(payload["job_id"])
+            self._set_job_status(job_id, "Cancelled")
+            if self.api_server and self.jobs.get(job_id, {}).get("source") == "api":
+                self.api_server.store.cancel(job_id)
         elif event == "job_error":
             self.progress.stop()
             message = str(payload.get("message", "Unknown error"))
             job_id = str(payload["job_id"])
             self._set_job_status(job_id, "Failed", error=message)
+            if self.api_server and self.jobs.get(job_id, {}).get("source") == "api":
+                self.api_server.store.fail(job_id, message)
             self.status_var.set(f"Video {payload['index']} of {payload['total']} failed; continuing…")
             self.detail_var.set(message)
         elif event == "batch_done":
@@ -501,13 +716,21 @@ class TranscriberApp(tk.Tk):
             else:
                 self.status_var.set("Batch complete")
                 self.detail_var.set(f"{completed} completed, {failed} failed. Transcript files are ready to export.")
-                messagebox.showinfo(
-                    APP_NAME,
-                    f"Batch complete: {completed} transcript{'s' if completed != 1 else ''} ready"
-                    + (f", {failed} failed." if failed else "."),
-                )
+                if not payload.get("api_only"):
+                    messagebox.showinfo(
+                        APP_NAME,
+                        f"Batch complete: {completed} transcript{'s' if completed != 1 else ''} ready"
+                        + (f", {failed} failed." if failed else "."),
+                    )
             self.active_job_id = None
             self._refresh_export_buttons()
+            pending_api = [
+                job_id
+                for job_id, job in self.jobs.items()
+                if job.get("status") == "Queued" and job.get("source") == "api"
+            ]
+            if pending_api and not stopped:
+                self.after(100, lambda: self._launch_batch(pending_api))
         elif event == "cancelled":
             # Backward-compatible event for a single job interrupted by a dependency.
             self.progress.stop()
@@ -524,6 +747,8 @@ class TranscriberApp(tk.Tk):
         self.progress.stop()
         self.progress.configure(mode="determinate", value=100)
         self.results[job_id] = result
+        if self.api_server and self.jobs.get(job_id, {}).get("source") == "api":
+            self.api_server.store.complete(job_id, result)
         self.last_result = result
         probability = f" ({result.language_probability:.0%} confidence)" if result.language_probability else ""
         self._set_job_status(job_id, "Done", display=result.title)

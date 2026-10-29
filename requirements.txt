@@ -1,2 +1,4 @@
 faster-whisper==1.2.1
+fastapi>=0.115,<0.116
+uvicorn>=0.30,<0.35
 yt-dlp[default]>=2025.1.15

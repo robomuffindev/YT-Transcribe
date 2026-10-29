@@ -6,6 +6,8 @@ Built and maintained by [Robomuffin Labs](https://robomuffinlabs.com/), home to 
 
 No transcription API key is required. Audio is transcribed locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper); media downloading is handled by [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
+![YT Transcriber turns online video into local transcripts and AI-agent-ready context](docs/images/yt-transcriber-feature.png)
+
 > [!IMPORTANT]
 > Download and transcribe only media you are authorized to use. You are responsible for complying with YouTube's terms, copyright law, privacy obligations, and any rules governing the source material.
 
@@ -21,7 +23,26 @@ No transcription API key is required. Audio is transcribed locally with [faster-
 - Keep the downloaded video or retain only its audio.
 - Preview and copy completed transcripts inside the app.
 - Export an individual transcript or all completed transcripts as a ZIP.
+- Let local LLM agents and applications submit jobs and retrieve transcripts through an opt-in localhost API.
+- Copy complete, live agent connection instructions directly from the app.
+- Integrate from OpenAPI-aware tools using the bundled schema and interactive Swagger documentation.
 - Write rotating diagnostic logs for troubleshooting.
+
+## Screenshots
+
+### Desktop queue and transcript workflow
+
+![YT Transcriber desktop app with URL input, model settings, batch queue, progress, and transcript preview](docs/images/app-main.png)
+
+### Opt-in localhost API
+
+![YT Transcriber with the authenticated localhost Agent API enabled](docs/images/app-api-enabled.png)
+
+### Copy-ready LLM agent instructions
+
+The live bearer token is deliberately hidden on screen and is included only when **Copy all instructions** is selected.
+
+![YT Transcriber agent instructions with the private bearer token hidden](docs/images/app-agent-instructions.png)
 
 ## Generated files
 
@@ -170,9 +191,42 @@ The **Stop** button cancels the active job after the current operation reaches a
 
 The ZIP intentionally excludes downloaded video and audio files.
 
+## Local API for LLM agents and applications
+
+YT Transcriber includes an optional HTTP API for another agent or application running on the same computer. It is disabled by default, binds only to `127.0.0.1`, and protects every `/v1` endpoint with a newly generated session bearer token.
+
+### Connect an agent
+
+1. Start YT Transcriber with `run.bat`.
+2. Choose the output folder, model, language, and processing mode that API jobs should use.
+3. Turn on **Enable localhost API**.
+4. Select **Agent instructions**.
+5. Select **Copy all instructions** and paste the result into the local LLM agent or application that will make the requests.
+
+The generated instructions contain the live base URL, session token, endpoints, request bodies, polling rules, transcript formats, and security guidance. The token is hidden in the on-screen preview so screenshots do not leak it; the copy action includes it so the receiving agent can authenticate.
+
+The normal agent workflow is:
+
+```text
+GET  /health
+GET  /v1/capabilities
+POST /v1/jobs              or POST /v1/batches
+GET  /v1/jobs/{job_id}     until completed, failed, or cancelled
+GET  /v1/jobs/{job_id}/transcript?format=markdown
+```
+
+API submissions enter the same sequential queue as desktop jobs. A `202 Accepted` response means the work was queued, not completed. Agents should use an `idempotency_key` for safe retries and should poll no more often than once every two seconds.
+
+See the [complete local API reference](docs/API.md) and the [generic copy/paste agent prompt](docs/LLM_AGENT_INSTRUCTIONS.md). When the API is enabled, **API docs** opens live Swagger documentation at `http://127.0.0.1:8765/docs`, and the OpenAPI schema is available at `http://127.0.0.1:8765/openapi.json`.
+
+> [!CAUTION]
+> This is a localhost integration surface, not an internet-facing service. Do not expose it with port forwarding or a public tunnel. Treat the session bearer token as a secret.
+
 ## Privacy and network behavior
 
 Transcription runs locally. The application does not send transcript text to OpenAI or another LLM service.
+
+The optional agent API remains on this computer. It is off by default, listens only on the loopback interface, does not enable CORS, and stops accepting requests when the toggle is disabled or the desktop app closes.
 
 Network access is still used for:
 
@@ -245,8 +299,16 @@ The first run may be downloading a large Whisper model. Check the status text an
 ```text
 .
 ├── .github/                 # CI, issue forms, and pull request template
+├── docs/
+│   ├── images/              # GitHub screenshots and website feature artwork
+│   ├── API.md               # Local agent API reference
+│   ├── ELEMENTOR_WRITEUP.md # Website page copy
+│   └── LLM_AGENT_INSTRUCTIONS.md
+├── scripts/
+│   └── smoke_api.py         # Real localhost API smoke test
 ├── tests/                   # Unit tests
 ├── yt_transcriber/
+│   ├── api.py               # Local FastAPI server, auth, and job state
 │   ├── core.py              # Download, transcription, and output pipeline
 │   ├── hardware.py          # CUDA device and runtime validation
 │   └── ui.py                # Tk desktop interface and batch queue
@@ -261,7 +323,7 @@ The first run may be downloading a large Whisper model. Check the status text an
 ## Development
 
 ```powershell
-git clone <your-repository-url>
+git clone https://github.com/robomuffindev/YT-Transcribe.git
 cd YT-Transcribe
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
@@ -278,6 +340,12 @@ python -m pytest
 python -m pip check
 ```
 
+Run the API smoke test when local sockets are permitted:
+
+```powershell
+python scripts\smoke_api.py
+```
+
 GitHub Actions runs these checks on Windows and Ubuntu with Python 3.11 and 3.12. The desktop batch launchers are Windows-specific, but the core package and tests are kept portable where practical.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
@@ -288,6 +356,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 - No speaker diarization or speaker labels.
 - No queue persistence after the application closes.
 - Jobs are intentionally sequential rather than parallel.
+- The integration API is localhost-only and is not a hosted or multi-user service.
 - The application does not summarize or analyze transcripts; it prepares them for another tool.
 
 ## Security
@@ -297,6 +366,8 @@ See [SECURITY.md](SECURITY.md) for private vulnerability reporting and data-hand
 ## About Robomuffin Labs
 
 YT Transcriber is a [Robomuffin Labs](https://robomuffinlabs.com/) project. Robomuffin Labs builds and shares practical AI-augmented tools and experiments for creators, researchers, and people who enjoy running useful technology locally.
+
+Website publishing copy and image guidance are available in [docs/ELEMENTOR_WRITEUP.md](docs/ELEMENTOR_WRITEUP.md).
 
 ## License
 
