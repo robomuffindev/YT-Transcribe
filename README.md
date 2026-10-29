@@ -2,6 +2,8 @@
 
 YT Transcriber is a local Windows desktop application that downloads public or otherwise authorized YouTube videos and turns their speech into files that are easy to review with an LLM. It supports unattended multi-video queues, NVIDIA GPU acceleration, CPU fallback, transcript previews, subtitles, structured JSON, and batch ZIP exports.
 
+Built and maintained by [Robomuffin Labs](https://robomuffinlabs.com/), home to AI-augmented tools, experiments, and resources.
+
 No transcription API key is required. Audio is transcribed locally with [faster-whisper](https://github.com/SYSTRAN/faster-whisper); media downloading is handled by [yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
 > [!IMPORTANT]
@@ -291,6 +293,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.
 ## Security
 
 See [SECURITY.md](SECURITY.md) for private vulnerability reporting and data-handling guidance.
+
+## About Robomuffin Labs
+
+YT Transcriber is a [Robomuffin Labs](https://robomuffinlabs.com/) project. Robomuffin Labs builds and shares practical AI-augmented tools and experiments for creators, researchers, and people who enjoy running useful technology locally.
 
 ## License
 
